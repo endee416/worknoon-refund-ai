@@ -1,0 +1,89 @@
+services:
+  firestore:
+    build:
+      context: .
+      dockerfile: firebase.Dockerfile
+
+    ports:
+      - "8080:8080"
+      - "4000:4000"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080').then(() => process.exit(0)).catch(() => process.exit(1))"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+
+  seed:
+    build:
+      context: ./backend
+
+    environment:
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+      FIREBASE_PROJECT_ID: demo-worknoon-refund
+
+    depends_on:
+      firestore:
+        condition: service_healthy
+
+    command:
+      [
+        "node",
+        "dist/scripts/seed.js"
+      ]
+
+    restart: "no"
+
+
+  backend:
+    build:
+      context: ./backend
+
+    ports:
+      - "3001:3001"
+
+    environment:
+      PORT: 3001
+      FIRESTORE_EMULATOR_HOST: firestore:8080
+      FIREBASE_PROJECT_ID: demo-worknoon-refund
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); process.exit(0); }).catch(() => process.exit(1))"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: http://localhost:3001
+
+    ports:
+      - "5173:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
